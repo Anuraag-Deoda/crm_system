@@ -9,6 +9,7 @@ from .api.routes.leads import leads_bp
 from .api.routes.vehicles import vehicles_bp
 from .api.routes.calls import calls_bp
 from .api.routes.demo import demo_bp
+from .api.routes.tts import tts_bp
 from .services.call_manager import CallManager
 
 app = Flask(__name__)
@@ -22,6 +23,7 @@ app.register_blueprint(leads_bp, url_prefix='/api/leads')
 app.register_blueprint(vehicles_bp, url_prefix='/api/vehicles')
 app.register_blueprint(calls_bp, url_prefix='/api/calls')
 app.register_blueprint(demo_bp, url_prefix='/api/demo')
+app.register_blueprint(tts_bp, url_prefix='/api/tts')
 
 
 @app.route('/')
