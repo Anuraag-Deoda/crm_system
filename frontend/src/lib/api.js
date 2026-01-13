@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:5000/api';
+// Use relative URL so Vite proxy handles it, or direct URL for Docker
+const API_BASE = '/api';
 
 const api = axios.create({
   baseURL: API_BASE,

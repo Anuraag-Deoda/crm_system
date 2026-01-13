@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: satis-crm-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend/data:/app/data
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: satis-crm-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://backend:5000
+    restart: unless-stopped
+
+networks:
+  default:
+    name: satis-crm-network
