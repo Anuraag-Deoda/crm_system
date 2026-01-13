@@ -25,7 +25,8 @@ function DemoCall() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
-  const [useElevenLabs, setUseElevenLabs] = useState(true);
+  const [useElevenLabs, setUseElevenLabs] = useState(false); // Default to browser voice
+  const [elevenLabsAvailable, setElevenLabsAvailable] = useState(false);
 
   const transcriptRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -45,6 +46,25 @@ function DemoCall() {
   useEffect(() => { takenOverRef.current = takenOver; }, [takenOver]);
   useEffect(() => { useElevenLabsRef.current = useElevenLabs; }, [useElevenLabs]);
   useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
+
+  // Check ElevenLabs availability on mount
+  useEffect(() => {
+    const checkTTSStatus = async () => {
+      try {
+        const response = await ttsAPI.getStatus();
+        const available = response.data.available;
+        setElevenLabsAvailable(available);
+        if (available) {
+          setUseElevenLabs(true);
+        }
+      } catch (err) {
+        console.log('ElevenLabs not available, using browser voice');
+        setElevenLabsAvailable(false);
+        setUseElevenLabs(false);
+      }
+    };
+    checkTTSStatus();
+  }, []);
 
   // Fallback to browser speech synthesis
   const speakWithBrowser = useCallback((text) => {
@@ -365,15 +385,24 @@ function DemoCall() {
             <label className="flex items-center justify-center gap-3 cursor-pointer">
               <span className={`text-sm ${!useElevenLabs ? 'font-medium' : 'text-gray-500'}`}>Browser Voice</span>
               <div
-                className={`relative w-12 h-6 rounded-full transition-colors ${useElevenLabs ? 'bg-blue-500' : 'bg-gray-300'}`}
-                onClick={() => setUseElevenLabs(!useElevenLabs)}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  !elevenLabsAvailable ? 'bg-gray-200 cursor-not-allowed' :
+                  useElevenLabs ? 'bg-blue-500' : 'bg-gray-300'
+                }`}
+                onClick={() => elevenLabsAvailable && setUseElevenLabs(!useElevenLabs)}
               >
                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${useElevenLabs ? 'translate-x-7' : 'translate-x-1'}`}></div>
               </div>
-              <span className={`text-sm ${useElevenLabs ? 'font-medium' : 'text-gray-500'}`}>ElevenLabs (HD)</span>
+              <span className={`text-sm ${useElevenLabs ? 'font-medium' : 'text-gray-500'}`}>
+                ElevenLabs {elevenLabsAvailable ? '(HD)' : '(N/A)'}
+              </span>
             </label>
             <p className="text-xs text-gray-400 mt-1">
-              {useElevenLabs ? 'High-quality natural voice (requires API key)' : 'Built-in browser voice'}
+              {!elevenLabsAvailable
+                ? 'ElevenLabs API key not configured - using browser voice'
+                : useElevenLabs
+                  ? 'High-quality natural voice'
+                  : 'Built-in browser voice'}
             </p>
           </div>
 

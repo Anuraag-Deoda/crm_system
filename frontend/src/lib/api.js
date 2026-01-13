@@ -96,6 +96,7 @@ export const ttsAPI = {
     return response.data;
   },
   getVoices: () => api.get('/tts/voices'),
+  getStatus: () => api.get('/tts/status'),
 };
 
 export default api;
