@@ -1,29 +1,269 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Phone,
   PhoneOff,
-  Send,
+  Mic,
+  MicOff,
   UserCheck,
   AlertTriangle,
   Clock,
   Zap,
-  MessageSquare
+  MessageSquare,
+  Volume2,
+  VolumeX,
+  RefreshCw
 } from 'lucide-react';
-import { demoAPI } from '../lib/api';
+import { demoAPI, ttsAPI } from '../lib/api';
 
 function DemoCall() {
   const [callActive, setCallActive] = useState(false);
   const [callData, setCallData] = useState(null);
-  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [takenOver, setTakenOver] = useState(false);
-  const transcriptRef = useRef(null);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [transcript, setTranscript] = useState('');
+  const [error, setError] = useState('');
+  const [useElevenLabs, setUseElevenLabs] = useState(true);
 
+  const transcriptRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const audioRef = useRef(null);
+  const synthRef = useRef(window.speechSynthesis);
+
+  // Use refs to avoid stale closures
+  const callActiveRef = useRef(callActive);
+  const callDataRef = useRef(callData);
+  const takenOverRef = useRef(takenOver);
+  const useElevenLabsRef = useRef(useElevenLabs);
+  const voiceEnabledRef = useRef(voiceEnabled);
+
+  // Keep refs in sync
+  useEffect(() => { callActiveRef.current = callActive; }, [callActive]);
+  useEffect(() => { callDataRef.current = callData; }, [callData]);
+  useEffect(() => { takenOverRef.current = takenOver; }, [takenOver]);
+  useEffect(() => { useElevenLabsRef.current = useElevenLabs; }, [useElevenLabs]);
+  useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
+
+  // Fallback to browser speech synthesis
+  const speakWithBrowser = useCallback((text) => {
+    if (!voiceEnabledRef.current || !text) return;
+
+    synthRef.current.cancel();
+    setIsSpeaking(true);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'hi-IN';
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+
+    const voices = synthRef.current.getVoices();
+    const hindiVoice = voices.find(v => v.lang.includes('hi')) ||
+                       voices.find(v => v.lang.includes('en-IN')) ||
+                       voices[0];
+    if (hindiVoice) {
+      utterance.voice = hindiVoice;
+    }
+
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    synthRef.current.speak(utterance);
+  }, []);
+
+  // Speak using ElevenLabs
+  const speakWithElevenLabs = useCallback(async (text) => {
+    if (!voiceEnabledRef.current || !text) return;
+
+    try {
+      setIsSpeaking(true);
+      const audioBlob = await ttsAPI.speak(text, 'rachel');
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        await audioRef.current.play();
+      }
+    } catch (err) {
+      console.error('ElevenLabs TTS error:', err);
+      // Fallback to browser speech
+      speakWithBrowser(text);
+    }
+  }, [speakWithBrowser]);
+
+  // Main speak function
+  const speakResponse = useCallback((text) => {
+    if (useElevenLabsRef.current) {
+      speakWithElevenLabs(text);
+    } else {
+      speakWithBrowser(text);
+    }
+  }, [speakWithElevenLabs, speakWithBrowser]);
+
+  // Handle voice input - this is the function that processes speech
+  const processVoiceInput = useCallback(async (voiceText) => {
+    if (!voiceText.trim()) return;
+    if (!callActiveRef.current) {
+      console.log('Call not active, ignoring input');
+      return;
+    }
+
+    const currentCallData = callDataRef.current;
+    if (!currentCallData?.call_id) {
+      console.log('No call data, ignoring input');
+      return;
+    }
+
+    setLoading(true);
+    setTranscript('');
+    setError('');
+
+    try {
+      console.log('Sending message:', voiceText, 'to call:', currentCallData.call_id);
+
+      const response = takenOverRef.current
+        ? await demoAPI.sendHumanMessage(currentCallData.call_id, voiceText)
+        : await demoAPI.sendMessage(currentCallData.call_id, voiceText);
+
+      console.log('Response received:', response.data);
+
+      setCallData(response.data.call);
+
+      // Get AI response and speak it
+      const lastMessage = response.data.call.transcript?.slice(-1)[0];
+      if (lastMessage && lastMessage.role === 'assistant') {
+        speakResponse(lastMessage.content);
+      }
+
+      if (response.data.takeover_requested) {
+        setTakenOver(true);
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      setError('Failed to process. Please try again.');
+      if (err.response?.data?.takeover) {
+        setTakenOver(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [speakResponse]);
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'hi-IN'; // Hindi-English
+
+      recognitionRef.current.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcriptText = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcriptText;
+          } else {
+            interimTranscript += transcriptText;
+          }
+        }
+
+        setTranscript(finalTranscript || interimTranscript);
+
+        if (finalTranscript) {
+          processVoiceInput(finalTranscript);
+        }
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+
+        if (event.error === 'network') {
+          setError('Network error. Make sure you have internet connection. Try using Chrome browser.');
+        } else if (event.error === 'not-allowed') {
+          setError('Microphone access denied. Please allow microphone access in browser settings.');
+        } else if (event.error === 'no-speech') {
+          setError('No speech detected. Please try again.');
+        } else {
+          setError(`Voice error: ${event.error}. Try clicking the mic again.`);
+        }
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    } else {
+      setError('Voice recognition not supported. Please use Chrome browser.');
+    }
+
+    // Create audio element for ElevenLabs playback
+    audioRef.current = new Audio();
+    audioRef.current.onended = () => setIsSpeaking(false);
+    audioRef.current.onerror = () => {
+      setIsSpeaking(false);
+      console.error('Audio playback error');
+    };
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+      synthRef.current.cancel();
+    };
+  }, [processVoiceInput]);
+
+  // Auto-scroll transcript
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
   }, [callData?.transcript]);
+
+  // Toggle listening
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      setTranscript('');
+      setError('');
+
+      // Stop any ongoing speech
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      synthRef.current.cancel();
+      setIsSpeaking(false);
+
+      try {
+        recognitionRef.current?.start();
+        setIsListening(true);
+      } catch (e) {
+        console.error('Recognition start error:', e);
+        setError('Could not start voice recognition. Please try again.');
+      }
+    }
+  };
+
+  // Stop speaking
+  const stopSpeaking = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    synthRef.current.cancel();
+    setIsSpeaking(false);
+  };
 
   const startCall = async () => {
     setLoading(true);
@@ -34,38 +274,22 @@ function DemoCall() {
         direction: 'inbound',
         type: 'inquiry'
       });
+
+      console.log('Call started:', response.data);
+
       setCallData(response.data.call);
       setCallActive(true);
       setTakenOver(false);
-    } catch (error) {
-      console.error('Failed to start call:', error);
-      alert('Failed to start call. Make sure the backend is running.');
-    } finally {
-      setLoading(false);
-    }
-  };
+      setError('');
 
-  const sendMessage = async (e) => {
-    e.preventDefault();
-    if (!message.trim() || !callActive) return;
-
-    setLoading(true);
-    try {
-      const response = takenOver
-        ? await demoAPI.sendHumanMessage(callData.call_id, message)
-        : await demoAPI.sendMessage(callData.call_id, message);
-
-      setCallData(response.data.call);
-      setMessage('');
-
-      if (response.data.takeover_requested) {
-        setTakenOver(true);
+      // Speak initial greeting
+      const initialMessage = response.data.call.transcript?.[0];
+      if (initialMessage && initialMessage.role === 'assistant') {
+        setTimeout(() => speakResponse(initialMessage.content), 500);
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      if (error.response?.data?.takeover) {
-        setTakenOver(true);
-      }
+    } catch (err) {
+      console.error('Failed to start call:', err);
+      setError('Failed to start call. Make sure the backend is running.');
     } finally {
       setLoading(false);
     }
@@ -76,19 +300,24 @@ function DemoCall() {
       const response = await demoAPI.takeover(callData.call_id, 'Manual takeover by admin');
       setCallData(response.data.call);
       setTakenOver(true);
-    } catch (error) {
-      console.error('Failed to takeover:', error);
+    } catch (err) {
+      console.error('Failed to takeover:', err);
     }
   };
 
   const endCall = async () => {
+    stopSpeaking();
+    recognitionRef.current?.stop();
+
     try {
       await demoAPI.endCall(callData.call_id, 'resolved');
       setCallActive(false);
       setCallData(null);
       setTakenOver(false);
-    } catch (error) {
-      console.error('Failed to end call:', error);
+      setIsListening(false);
+      setIsSpeaking(false);
+    } catch (err) {
+      console.error('Failed to end call:', err);
     }
   };
 
@@ -102,24 +331,58 @@ function DemoCall() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Update duration every second
+  useEffect(() => {
+    if (!callActive) return;
+    const interval = setInterval(() => {
+      setCallData(prev => prev ? {...prev} : null);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [callActive]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800">Demo Call</h1>
-        <p className="text-gray-500">Test the AI Agent</p>
+        <p className="text-gray-500">Voice-Enabled AI Agent Test</p>
       </div>
 
       {!callActive ? (
         /* Start Call Screen */
         <div className="bg-white rounded-xl shadow-sm p-8 text-center max-w-xl mx-auto">
-          <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Phone className="text-blue-600" size={40} />
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Phone className="text-green-600" size={40} />
           </div>
-          <h2 className="text-xl font-semibold mb-2">Start a Demo Call</h2>
-          <p className="text-gray-500 mb-6">
-            Simulate a customer call and test the AI agent's capabilities.
-            Type messages as the customer would speak.
+          <h2 className="text-xl font-semibold mb-2">Start a Voice Demo Call</h2>
+          <p className="text-gray-500 mb-4">
+            Simulate a customer call using your microphone.
+            <br />
+            <span className="text-sm">Click the mic button to speak as the customer.</span>
           </p>
+
+          {/* Voice Engine Selection */}
+          <div className="mb-6 p-3 bg-gray-50 rounded-lg">
+            <label className="flex items-center justify-center gap-3 cursor-pointer">
+              <span className={`text-sm ${!useElevenLabs ? 'font-medium' : 'text-gray-500'}`}>Browser Voice</span>
+              <div
+                className={`relative w-12 h-6 rounded-full transition-colors ${useElevenLabs ? 'bg-blue-500' : 'bg-gray-300'}`}
+                onClick={() => setUseElevenLabs(!useElevenLabs)}
+              >
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${useElevenLabs ? 'translate-x-7' : 'translate-x-1'}`}></div>
+              </div>
+              <span className={`text-sm ${useElevenLabs ? 'font-medium' : 'text-gray-500'}`}>ElevenLabs (HD)</span>
+            </label>
+            <p className="text-xs text-gray-400 mt-1">
+              {useElevenLabs ? 'High-quality natural voice (requires API key)' : 'Built-in browser voice'}
+            </p>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm">
+              {error}
+            </div>
+          )}
+
           <button
             onClick={startCall}
             disabled={loading}
@@ -130,13 +393,13 @@ function DemoCall() {
             ) : (
               <Phone size={20} />
             )}
-            Start Call
+            Start Voice Call
           </button>
         </div>
       ) : (
         /* Active Call Screen */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Transcript Panel */}
+          {/* Main Call Panel */}
           <div className="lg:col-span-2 bg-white rounded-xl shadow-sm flex flex-col h-[600px]">
             {/* Call Header */}
             <div className="p-4 border-b flex items-center justify-between">
@@ -145,13 +408,22 @@ function DemoCall() {
                 <span className="font-medium">
                   {takenOver ? 'Human Agent Mode' : 'AI Handling Call'}
                 </span>
+                <span className={`text-xs px-2 py-0.5 rounded ${useElevenLabs ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                  {useElevenLabs ? 'ElevenLabs' : 'Browser'}
+                </span>
               </div>
               <div className="flex items-center gap-4 text-sm text-gray-500">
                 <span className="flex items-center gap-1">
                   <Clock size={16} />
                   {formatDuration()}
                 </span>
-                <span>{callData?.phone}</span>
+                <button
+                  onClick={() => setVoiceEnabled(!voiceEnabled)}
+                  className={`p-1 rounded ${voiceEnabled ? 'text-green-600' : 'text-gray-400'}`}
+                  title={voiceEnabled ? 'Mute AI voice' : 'Enable AI voice'}
+                >
+                  {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                </button>
               </div>
             </div>
 
@@ -181,28 +453,96 @@ function DemoCall() {
                   </div>
                 </div>
               ))}
+
+              {/* Live transcript preview */}
+              {transcript && (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] rounded-lg p-3 bg-blue-200 text-blue-800 border-2 border-dashed border-blue-400">
+                    <div className="text-xs opacity-70 mb-1">Speaking...</div>
+                    <p className="whitespace-pre-wrap">{transcript}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading indicator */}
+              {loading && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-100 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+                      AI is thinking...
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Message Input */}
-            <form onSubmit={sendMessage} className="p-4 border-t">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder={takenOver ? "Type as human agent..." : "Type customer message..."}
-                  className="flex-1 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={loading}
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !message.trim()}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-                >
-                  <Send size={20} />
-                </button>
+            {/* Voice Controls */}
+            <div className="p-6 border-t bg-gray-50">
+              {error && (
+                <div className="bg-red-50 text-red-600 p-2 rounded-lg mb-4 text-sm text-center flex items-center justify-center gap-2">
+                  <AlertTriangle size={16} />
+                  {error}
+                  <button
+                    onClick={() => setError('')}
+                    className="ml-2 text-red-400 hover:text-red-600"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Big Mic Button */}
+              <div className="flex flex-col items-center gap-4">
+                <div className="flex items-center gap-4">
+                  {/* Stop Speaking Button */}
+                  {isSpeaking && (
+                    <button
+                      onClick={stopSpeaking}
+                      className="w-14 h-14 rounded-full bg-orange-500 hover:bg-orange-600 flex items-center justify-center shadow-lg"
+                      title="Stop AI speaking"
+                    >
+                      <VolumeX size={24} className="text-white" />
+                    </button>
+                  )}
+
+                  {/* Main Mic Button */}
+                  <button
+                    onClick={toggleListening}
+                    disabled={loading || isSpeaking}
+                    className={`w-24 h-24 rounded-full flex items-center justify-center transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isListening
+                        ? 'bg-red-500 animate-pulse shadow-lg shadow-red-300'
+                        : 'bg-blue-500 hover:bg-blue-600 shadow-lg shadow-blue-300'
+                    }`}
+                  >
+                    {isListening ? (
+                      <MicOff size={40} className="text-white" />
+                    ) : (
+                      <Mic size={40} className="text-white" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="text-center">
+                  {loading ? (
+                    <p className="text-gray-600 flex items-center gap-2 justify-center">
+                      <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></span>
+                      Processing...
+                    </p>
+                  ) : isSpeaking ? (
+                    <p className="text-green-600 flex items-center gap-2 justify-center">
+                      <Volume2 size={18} className="animate-pulse" />
+                      AI is speaking... (click orange button to interrupt)
+                    </p>
+                  ) : isListening ? (
+                    <p className="text-red-600 font-medium">Listening... (click to stop)</p>
+                  ) : (
+                    <p className="text-gray-500">Click the mic to speak as customer</p>
+                  )}
+                </div>
               </div>
-            </form>
+            </div>
 
             {/* Action Buttons */}
             <div className="p-4 border-t flex gap-3">
@@ -227,6 +567,34 @@ function DemoCall() {
 
           {/* Context Panel */}
           <div className="space-y-4">
+            {/* Voice Status */}
+            <div className="bg-white rounded-xl shadow-sm p-4">
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
+                <Mic size={18} className="text-blue-500" />
+                Voice Status
+              </h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Microphone</span>
+                  <span className={`px-2 py-1 rounded text-xs ${isListening ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {isListening ? 'Active' : 'Ready'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">AI Voice</span>
+                  <span className={`px-2 py-1 rounded text-xs ${isSpeaking ? 'bg-green-100 text-green-700' : voiceEnabled ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {isSpeaking ? 'Speaking' : voiceEnabled ? 'Enabled' : 'Muted'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Voice Engine</span>
+                  <span className={`px-2 py-1 rounded text-xs ${useElevenLabs ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {useElevenLabs ? 'ElevenLabs HD' : 'Browser'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* AI Context */}
             <div className="bg-white rounded-xl shadow-sm p-4">
               <h3 className="font-semibold mb-3 flex items-center gap-2">
@@ -288,15 +656,11 @@ function DemoCall() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Call ID</span>
-                  <span className="font-mono text-xs">{callData?.call_id}</span>
+                  <span className="font-mono text-xs">{callData?.call_id?.slice(0, 8)}...</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Type</span>
                   <span className="capitalize">{callData?.type}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Direction</span>
-                  <span className="capitalize">{callData?.direction}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Status</span>
