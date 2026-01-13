@@ -90,4 +90,12 @@ export const demoAPI = {
   getStatus: (callId) => api.get(`/demo/status/${callId}`),
 };
 
+export const ttsAPI = {
+  speak: async (text, voice = 'rachel') => {
+    const response = await api.post('/tts/speak', { text, voice }, { responseType: 'blob' });
+    return response.data;
+  },
+  getVoices: () => api.get('/tts/voices'),
+};
+
 export default api;
