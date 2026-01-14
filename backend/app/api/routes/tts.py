@@ -15,15 +15,27 @@ def text_to_speech():
     if not text:
         return jsonify({'error': 'No text provided'}), 400
 
-    # Check if API key is configured
-    if not Config.ELEVENLABS_API_KEY:
+    # Re-check API key at request time (in case env wasn't loaded at import)
+    api_key = Config.ELEVENLABS_API_KEY
+    if not api_key:
+        # Try loading directly from env
+        import os
+        api_key = os.getenv('elevenlabs_api_key') or os.getenv('ELEVENLABS_API_KEY')
+        if api_key:
+            Config.ELEVENLABS_API_KEY = api_key
+            print(f"[TTS] Loaded API key from env directly")
+
+    if not api_key:
+        print(f"[TTS] API key not found!")
         return jsonify({
             'error': 'ElevenLabs API key not configured',
             'fallback': True
         }), 503
 
     try:
+        print(f"[TTS] Generating speech for: {text[:50]}...")
         audio_content = TTSService.get_speech(text, voice)
+        print(f"[TTS] Generated {len(audio_content)} bytes of audio")
         return Response(
             audio_content,
             mimetype='audio/mpeg',
@@ -33,9 +45,12 @@ def text_to_speech():
             }
         )
     except ValueError as e:
+        print(f"[TTS] ValueError: {e}")
         return jsonify({'error': str(e), 'fallback': True}), 400
     except Exception as e:
-        print(f"TTS Error: {e}")
+        import traceback
+        print(f"[TTS] Error: {e}")
+        print(f"[TTS] Traceback: {traceback.format_exc()}")
         return jsonify({
             'error': 'Failed to generate speech',
             'details': str(e),
