@@ -24,12 +24,12 @@ class CRMAgent:
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",  # Better quality for natural conversation
                 messages=conversation,
                 tools=AGENT_FUNCTIONS,
                 tool_choice="auto",
-                temperature=0.7,
-                max_tokens=500
+                temperature=0.85,  # Higher for more natural variation
+                max_tokens=300  # Keep responses concise
             )
 
             assistant_message = response.choices[0].message
@@ -65,10 +65,10 @@ class CRMAgent:
                 conversation.extend(tool_results)
 
                 follow_up = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4o",
                     messages=conversation,
-                    temperature=0.7,
-                    max_tokens=500
+                    temperature=0.85,
+                    max_tokens=300
                 )
                 final_response = follow_up.choices[0].message.content
                 conversation.append({"role": "assistant", "content": final_response})
@@ -126,7 +126,15 @@ class CRMAgent:
         return 0.0
 
     def get_greeting(self):
-        return "Satis Motor mein aapka swagat hai! Main aapki kaise madad kar sakta hoon?"
+        # More natural, conversational greetings
+        import random
+        greetings = [
+            "Hello! Satis Motor se Priya bol rahi hoon. Kaise help kar sakti hoon aapki?",
+            "Haan ji, Satis Motor - Priya here! Bataiye kya kar sakti hoon aapke liye?",
+            "Good morning! Satis Motor se baat ho rahi hai. Main Priya, bataiye?",
+            "Hello ji! Satis Motor, Priya speaking. Kya help chahiye aapko?"
+        ]
+        return random.choice(greetings)
 
     def clear_conversation(self, call_id):
         if call_id in self.conversations:
