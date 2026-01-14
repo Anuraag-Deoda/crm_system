@@ -27,6 +27,13 @@ function DemoCall() {
   const [error, setError] = useState('');
   const [useElevenLabs, setUseElevenLabs] = useState(false); // Default to browser voice
   const [elevenLabsAvailable, setElevenLabsAvailable] = useState(false);
+  const [language, setLanguage] = useState('hi-IN'); // hi-IN, mr-IN, en-IN
+
+  const LANGUAGE_OPTIONS = [
+    { code: 'hi-IN', name: 'Hindi', flag: '🇮🇳' },
+    { code: 'mr-IN', name: 'Marathi', flag: '🏛️' },
+    { code: 'en-IN', name: 'English (India)', flag: '🇬🇧' }
+  ];
 
   const transcriptRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -39,6 +46,7 @@ function DemoCall() {
   const takenOverRef = useRef(takenOver);
   const useElevenLabsRef = useRef(useElevenLabs);
   const voiceEnabledRef = useRef(voiceEnabled);
+  const languageRef = useRef(language);
 
   // Keep refs in sync
   useEffect(() => { callActiveRef.current = callActive; }, [callActive]);
@@ -46,6 +54,7 @@ function DemoCall() {
   useEffect(() => { takenOverRef.current = takenOver; }, [takenOver]);
   useEffect(() => { useElevenLabsRef.current = useElevenLabs; }, [useElevenLabs]);
   useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
+  useEffect(() => { languageRef.current = language; }, [language]);
 
   // Check ElevenLabs availability on mount
   useEffect(() => {
@@ -177,7 +186,7 @@ function DemoCall() {
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'hi-IN'; // Hindi-English
+      recognitionRef.current.lang = languageRef.current; // Dynamic language
 
       recognitionRef.current.onresult = (event) => {
         let interimTranscript = '';
@@ -266,6 +275,10 @@ function DemoCall() {
       setIsSpeaking(false);
 
       try {
+        // Update language before starting
+        if (recognitionRef.current) {
+          recognitionRef.current.lang = languageRef.current;
+        }
         recognitionRef.current?.start();
         setIsListening(true);
       } catch (e) {
@@ -379,6 +392,29 @@ function DemoCall() {
             <br />
             <span className="text-sm">Click the mic button to speak as the customer.</span>
           </p>
+
+          {/* Language Selection */}
+          <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Language / भाषा निवडा
+            </label>
+            <div className="flex justify-center gap-2">
+              {LANGUAGE_OPTIONS.map((lang) => (
+                <button
+                  key={lang.code}
+                  onClick={() => setLanguage(lang.code)}
+                  className={`px-4 py-2 rounded-lg text-sm transition-all ${
+                    language === lang.code
+                      ? 'bg-blue-500 text-white shadow-md'
+                      : 'bg-white text-gray-700 border hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="mr-1">{lang.flag}</span>
+                  {lang.name}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Voice Engine Selection */}
           <div className="mb-6 p-3 bg-gray-50 rounded-lg">
@@ -619,6 +655,12 @@ function DemoCall() {
                   <span className="text-gray-500">Voice Engine</span>
                   <span className={`px-2 py-1 rounded text-xs ${useElevenLabs ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                     {useElevenLabs ? 'ElevenLabs HD' : 'Browser'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Language</span>
+                  <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">
+                    {LANGUAGE_OPTIONS.find(l => l.code === language)?.name || 'Hindi'}
                   </span>
                 </div>
               </div>
