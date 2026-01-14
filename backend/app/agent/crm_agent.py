@@ -102,7 +102,12 @@ class CRMAgent:
 
     def _calculate_confidence(self, response, user_message):
         confidence = 0.85
-        unclear_phrases = ["kya?", "samajh nahi", "phir se", "?", "huh", "what"]
+        # Hindi, English, and Marathi unclear phrases
+        unclear_phrases = [
+            "kya?", "samajh nahi", "phir se", "?", "huh", "what",
+            # Marathi unclear
+            "kay?", "samajla nahi", "parat sanga", "nahi kalala"
+        ]
         if any(phrase in user_message.lower() for phrase in unclear_phrases):
             confidence -= 0.2
 
@@ -112,8 +117,17 @@ class CRMAgent:
         return min(max(confidence, 0.3), 1.0)
 
     def _analyze_sentiment(self, message):
-        negative_words = ["problem", "issue", "kharab", "bura", "complaint", "angry", "upset", "galat", "bekaar", "worst"]
-        positive_words = ["good", "great", "thanks", "dhanyavaad", "achha", "best", "happy", "excellent"]
+        # Hindi, English, and Marathi sentiment words
+        negative_words = [
+            "problem", "issue", "kharab", "bura", "complaint", "angry", "upset", "galat", "bekaar", "worst",
+            # Marathi negative
+            "vait", "trasadi", "problem", "kharab", "naraz", "dukh"
+        ]
+        positive_words = [
+            "good", "great", "thanks", "dhanyavaad", "achha", "best", "happy", "excellent",
+            # Marathi positive
+            "mast", "chhan", "dhanyavaad", "khush", "uttam", "sundar", "barober"
+        ]
 
         message_lower = message.lower()
         neg_count = sum(1 for word in negative_words if word in message_lower)
