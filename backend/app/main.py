@@ -2,6 +2,9 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 
+from .config import Config
+Config.debug_keys()
+
 from .api.routes.customers import customers_bp
 from .api.routes.appointments import appointments_bp
 from .api.routes.complaints import complaints_bp
